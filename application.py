@@ -185,7 +185,7 @@ class TrayApp(QtWidgets.QSystemTrayIcon):
         keys = {}
         if not os.path.exists(KEYS_FILE):
             return keys
-        with open(KEYS_FILE, "r", encoding="utf-8") as f:
+        with open(KEYS_FILE, "r") as f:
             for line in f:
                 line = line.strip()
                 if not line or "=" not in line:
@@ -197,14 +197,14 @@ class TrayApp(QtWidgets.QSystemTrayIcon):
     def extract_key(self):
         if not self.file_path:
             return
-        with open(self.file_path, 'r', encoding="utf-8") as f:
+        with open(self.file_path, 'r') as f:
             key_line = next((line.strip() for line in f if line.startswith("Key=")), None)
         if not key_line:
             return
         key_value = key_line.split("=", 1)[1]
         name, ok = QInputDialog.getText(None, "Save Key", "Enter name to save this key under:")
         if ok and name:
-            with open(KEYS_FILE, "a", encoding="utf-8") as f:
+            with open(KEYS_FILE, "a") as f:
                 f.write(f"{name}={key_value}\n")
             self.refresh_saved_keys_menu()
 
