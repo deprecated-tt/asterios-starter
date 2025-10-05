@@ -296,7 +296,7 @@ class TrayApp(QtWidgets.QSystemTrayIcon):
             return
 
         # Подставляем Key=...
-        with open(self.file_path, "r", encoding="utf-8") as f:
+        with open(self.file_path, "r") as f:
             lines = f.readlines()
         updated = False
         for i, line in enumerate(lines):
@@ -306,7 +306,7 @@ class TrayApp(QtWidgets.QSystemTrayIcon):
                 break
         if not updated:
             lines.append(f"Key={value}\n")
-        with open(self.file_path, "w", encoding="utf-8") as f:
+        with open(self.file_path, "w") as f:
             f.writelines(lines)
 
         existing_pids = self.get_existing_game_pids()
@@ -373,8 +373,6 @@ class TrayApp(QtWidgets.QSystemTrayIcon):
             return
 
         x, y, w, h = rect
-        if w < 1000 or h < 700:
-            return
 
         self.window_positions[name] = {"x": x, "y": y, "width": w, "height": h}
         self.save_settings()
@@ -386,7 +384,7 @@ class TrayApp(QtWidgets.QSystemTrayIcon):
             return
         target_x, target_y, target_w, target_h = map(int, (pos["x"], pos["y"], pos["width"], pos["height"]))
 
-        deadline = time.time() + 7.0
+        deadline = time.time() + 20.0
         last_hwnd = None
         while time.time() < deadline:
             hwnd = self._pick_gameplay_window(pid)
@@ -425,7 +423,7 @@ class TrayApp(QtWidgets.QSystemTrayIcon):
         exs = GetWindowLongW(hwnd, GWL_EXSTYLE)
         return bool(exs & WS_EX_TOOLWINDOW)
 
-    def _pick_gameplay_window(self, pid, min_w=1000, min_h=700):
+    def _pick_gameplay_window(self, pid, min_w=0, min_h=0):
         """Выбираем видимое top-level окно процесса с максимальной площадью, без owner/tool, и не меньше порога."""
         if not IS_WINDOWS or not pid:
             return None
