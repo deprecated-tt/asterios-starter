@@ -58,18 +58,23 @@ if IS_WINDOWS:
 
     user32 = ctypes.WinDLL('user32', use_last_error=True)
     shell32 = ctypes.WinDLL('shell32', use_last_error=True)
+    shcore = ctypes.WinDLL('shcore', use_last_error=True)
 
     # DPI awareness
     def _enable_dpi_awareness():
+        # Use SYSTEM_AWARE mode for consistent coordinate handling across all monitors
+        # This avoids DPI scaling issues with per-monitor awareness
         try:
             SetProcessDpiAwarenessContext = user32.SetProcessDpiAwarenessContext
             SetProcessDpiAwarenessContext.restype = wintypes.BOOL
-            if SetProcessDpiAwarenessContext(ctypes.c_void_p(-4)):  # PER_MONITOR_AWARE_V2
+            # -2 = DPI_AWARENESS_CONTEXT_SYSTEM_AWARE
+            if SetProcessDpiAwarenessContext(ctypes.c_void_p(-2)):
                 return
         except Exception:
             pass
         try:
-            ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PER_MONITOR
+            # 1 = PROCESS_SYSTEM_DPI_AWARE
+            shcore.SetProcessDpiAwareness(1)
             return
         except Exception:
             pass
@@ -77,6 +82,28 @@ if IS_WINDOWS:
             user32.SetProcessDPIAware()
         except Exception:
             pass
+
+    # DPI helper functions
+    def _get_dpi_for_window(hwnd):
+        """Get DPI for a specific window (Windows 10 1607+)."""
+        try:
+            GetDpiForWindow = user32.GetDpiForWindow
+            GetDpiForWindow.argtypes = [wintypes.HWND]
+            GetDpiForWindow.restype = wintypes.UINT
+            dpi = GetDpiForWindow(hwnd)
+            return dpi if dpi > 0 else 96
+        except Exception:
+            return 96  # Default DPI
+
+    def _get_system_dpi():
+        """Get system DPI."""
+        try:
+            hdc = user32.GetDC(None)
+            dpi = ctypes.windll.gdi32.GetDeviceCaps(hdc, 88)  # LOGPIXELSX
+            user32.ReleaseDC(None, hdc)
+            return dpi if dpi > 0 else 96
+        except Exception:
+            return 96
 
     WNDENUMPROC = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
 
