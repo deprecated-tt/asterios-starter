@@ -403,7 +403,9 @@ class TrayApp(QtWidgets.QSystemTrayIcon):
         return {p.info['pid'] for p in psutil.process_iter(['pid', 'name'])
                 if p.info['name'] and p.info['name'].lower() == TARGET_PROCESS_NAME.lower()}
 
-    def wait_for_new_game_process(self, existing_pids, timeout=30):
+    def wait_for_new_game_process(self, existing_pids, timeout=None):
+        if timeout is None:
+            timeout = self.window_position_timeout
         deadline = time.time() + timeout
         newest_pid, newest_ct = None, -1.0
         while time.time() < deadline:
