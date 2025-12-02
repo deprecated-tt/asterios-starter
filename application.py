@@ -436,7 +436,7 @@ class TrayApp(QtWidgets.QSystemTrayIcon):
                     newest_ct, pid = ct, p.info['pid']
 
         hwnd = self._pick_gameplay_window(pid) if pid else GetForegroundWindow()
-        rect = self._get_visible_window_rect(hwnd)
+        rect = self._get_window_rect(hwnd)
         if not rect:
             return
 
@@ -458,7 +458,7 @@ class TrayApp(QtWidgets.QSystemTrayIcon):
         pos = self.window_positions.get(name)
         if not pos or not IS_WINDOWS:
             return
-        target_visible_x, target_visible_y, target_w, target_h = map(int, (pos["x"], pos["y"], pos["width"], pos["height"]))
+        target_x, target_y, target_w, target_h = map(int, (pos["x"], pos["y"], pos["width"], pos["height"]))
 
         deadline = time.time() + self.window_position_timeout
         last_hwnd = None
@@ -467,48 +467,20 @@ class TrayApp(QtWidgets.QSystemTrayIcon):
             if hwnd and int(hwnd) != 0:
                 last_hwnd = hwnd
                 ShowWindow(hwnd, SW_RESTORE)
-
-                # Calculate offset between visible and full window coordinates
-                full_rect = self._get_window_rect(hwnd)
-                visible_rect = self._get_visible_window_rect(hwnd)
-                if full_rect and visible_rect:
-                    offset_x = visible_rect[0] - full_rect[0]
-                    offset_y = visible_rect[1] - full_rect[1]
-                    # SetWindowPos uses full coordinates, so adjust target
-                    setwindowpos_x = target_visible_x - offset_x
-                    setwindowpos_y = target_visible_y - offset_y
-                else:
-                    # Fallback if we can't get offset
-                    setwindowpos_x = target_visible_x
-                    setwindowpos_y = target_visible_y
-
-                ok = SetWindowPos(hwnd, HWND_TOP, setwindowpos_x, setwindowpos_y, target_w, target_h,
+                ok = SetWindowPos(hwnd, HWND_TOP, target_x, target_y, target_w, target_h,
                                   SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW)
                 if not ok:
                     # это не откроет консоль, т.к. процесс pythonw.exe — но полезно оставить на случай лога в файл
                     err = ctypes.get_last_error()
                     print(f"SetWindowPos failed, GetLastError={err}")
-
-                # Check if visible position matches target
-                cur_visible = self._get_visible_window_rect(hwnd)
-                if cur_visible and abs(cur_visible[0]-target_visible_x) <= 2 and abs(cur_visible[1]-target_visible_y) <= 2:
+                cur = self._get_window_rect(hwnd)
+                if cur and abs(cur[0]-target_x) <= 2 and abs(cur[1]-target_y) <= 2:
                     return
             time.sleep(0.5)
 
         if last_hwnd:
             ShowWindow(last_hwnd, SW_RESTORE)
-            # Apply one last time with offset calculation
-            full_rect = self._get_window_rect(last_hwnd)
-            visible_rect = self._get_visible_window_rect(last_hwnd)
-            if full_rect and visible_rect:
-                offset_x = visible_rect[0] - full_rect[0]
-                offset_y = visible_rect[1] - full_rect[1]
-                setwindowpos_x = target_visible_x - offset_x
-                setwindowpos_y = target_visible_y - offset_y
-            else:
-                setwindowpos_x = target_visible_x
-                setwindowpos_y = target_visible_y
-            SetWindowPos(last_hwnd, HWND_TOP, setwindowpos_x, setwindowpos_y, target_w, target_h,
+            SetWindowPos(last_hwnd, HWND_TOP, target_x, target_y, target_w, target_h,
                          SWP_NOZORDER | SWP_NOACTIVATE | SWP_SHOWWINDOW)
 
     # ---- helpers ----
