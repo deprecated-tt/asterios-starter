@@ -59,6 +59,7 @@ if IS_WINDOWS:
     user32 = ctypes.WinDLL('user32', use_last_error=True)
     shell32 = ctypes.WinDLL('shell32', use_last_error=True)
     shcore = ctypes.WinDLL('shcore', use_last_error=True)
+    dwmapi = ctypes.WinDLL('dwmapi', use_last_error=True)
 
     # DPI awareness
     def _enable_dpi_awareness():
@@ -117,6 +118,7 @@ if IS_WINDOWS:
     ShellExecuteW = shell32.ShellExecuteW
     GetWindowLongW = user32.GetWindowLongW
     GetWindow = user32.GetWindow
+    DwmGetWindowAttribute = dwmapi.DwmGetWindowAttribute
 
     # consts
     SW_RESTORE = 9
@@ -127,6 +129,7 @@ if IS_WINDOWS:
     GW_OWNER = 4
     GWL_EXSTYLE = -20
     WS_EX_TOOLWINDOW = 0x00000080  # tool windows
+    DWMWA_EXTENDED_FRAME_BOUNDS = 9  # Get visible frame bounds excluding invisible borders
 
 class LaunchTask:
     def __init__(self, name: str, key_value: str):
@@ -142,6 +145,8 @@ class TrayApp(QtWidgets.QSystemTrayIcon):
         self.exe_path = None
         self.autostart_keys = []
         self.window_positions = {}
+        self.window_position_delay = 2.0  # seconds to wait before positioning window
+        self.window_position_timeout = 20.0  # max seconds to wait for window to load
         self.saved_key_items = []
         self.checkbox_by_name = {}
 
@@ -161,6 +166,8 @@ class TrayApp(QtWidgets.QSystemTrayIcon):
         self.settings_menu = QtWidgets.QMenu("⚙️ Settings", self.menu)
         self.config_action = self.settings_menu.addAction("📂 Configure File")
         self.exe_config_action = self.settings_menu.addAction("⚙️ Configure EXE")
+        self.delay_config_action = self.settings_menu.addAction("⏱️ Configure Window Delay")
+        self.timeout_config_action = self.settings_menu.addAction("⏳ Configure Window Timeout")
         self.menu.addMenu(self.settings_menu)
 
         self.menu.addSeparator()
@@ -168,6 +175,8 @@ class TrayApp(QtWidgets.QSystemTrayIcon):
 
         self.config_action.triggered.connect(self.select_file)
         self.exe_config_action.triggered.connect(self.select_exe_file)
+        self.delay_config_action.triggered.connect(self.configure_window_delay)
+        self.timeout_config_action.triggered.connect(self.configure_window_timeout)
         self.extract_action.triggered.connect(self.extract_key)
         self.quit_action.triggered.connect(QtWidgets.qApp.quit)
 
@@ -184,6 +193,8 @@ class TrayApp(QtWidgets.QSystemTrayIcon):
                 self.exe_path = data.get("exe_path")
                 self.autostart_keys = data.get("autostart_keys", []) or []
                 self.window_positions = data.get("window_positions", {}) or {}
+                self.window_position_delay = data.get("window_position_delay", 2.0)
+                self.window_position_timeout = data.get("window_position_timeout", 20.0)
 
     def save_settings(self):
         with open(SETTINGS_FILE, "w", encoding="utf-8") as f:
@@ -191,7 +202,9 @@ class TrayApp(QtWidgets.QSystemTrayIcon):
                 "file_path": self.file_path,
                 "exe_path": self.exe_path,
                 "autostart_keys": self.autostart_keys,
-                "window_positions": self.window_positions
+                "window_positions": self.window_positions,
+                "window_position_delay": self.window_position_delay,
+                "window_position_timeout": self.window_position_timeout
             }, f, ensure_ascii=False, indent=2)
 
     # ---------- File pickers ----------
@@ -205,6 +218,34 @@ class TrayApp(QtWidgets.QSystemTrayIcon):
         exe_path, _ = QFileDialog.getOpenFileName(None, "Select EXE File", filter="Executable (*.exe)")
         if exe_path:
             self.exe_path = exe_path
+            self.save_settings()
+
+    def configure_window_delay(self):
+        delay_str, ok = QInputDialog.getDouble(
+            None,
+            "Configure Window Delay",
+            "Enter delay in seconds before positioning window:",
+            self.window_position_delay,
+            0.1,
+            30.0,
+            1
+        )
+        if ok:
+            self.window_position_delay = delay_str
+            self.save_settings()
+
+    def configure_window_timeout(self):
+        timeout_str, ok = QInputDialog.getDouble(
+            None,
+            "Configure Window Timeout",
+            "Enter max seconds to wait for window to load:",
+            self.window_position_timeout,
+            1.0,
+            120.0,
+            1
+        )
+        if ok:
+            self.window_position_timeout = timeout_str
             self.save_settings()
 
     # ---------- Keys I/O ----------
@@ -374,7 +415,7 @@ class TrayApp(QtWidgets.QSystemTrayIcon):
                     if ct > newest_ct:
                         newest_ct, newest_pid = ct, p.info['pid']
             if newest_pid:
-                time.sleep(2.0)  # дать окну успеть появиться
+                time.sleep(self.window_position_delay)  # дать окну успеть появиться
                 return newest_pid
             time.sleep(0.3)
         return None
@@ -395,7 +436,7 @@ class TrayApp(QtWidgets.QSystemTrayIcon):
                     newest_ct, pid = ct, p.info['pid']
 
         hwnd = self._pick_gameplay_window(pid) if pid else GetForegroundWindow()
-        rect = self._get_window_rect(hwnd)
+        rect = self._get_visible_window_rect(hwnd)
         if not rect:
             return
 
@@ -404,6 +445,14 @@ class TrayApp(QtWidgets.QSystemTrayIcon):
         self.window_positions[name] = {"x": x, "y": y, "width": w, "height": h}
         self.save_settings()
 
+        # Show notification with saved coordinates
+        self.showMessage(
+            "Position Saved",
+            f"{name}\nX: {x}, Y: {y}\nSize: {w}x{h}",
+            QtWidgets.QSystemTrayIcon.Information,
+            3000  # 3 seconds
+        )
+
     def apply_saved_window_position(self, name, pid):
         """Ждём/находим игровое окно (не загрузчик) и двигаем его несколько раз (до 7 сек)."""
         pos = self.window_positions.get(name)
@@ -411,7 +460,7 @@ class TrayApp(QtWidgets.QSystemTrayIcon):
             return
         target_x, target_y, target_w, target_h = map(int, (pos["x"], pos["y"], pos["width"], pos["height"]))
 
-        deadline = time.time() + 20.0
+        deadline = time.time() + self.window_position_timeout
         last_hwnd = None
         while time.time() < deadline:
             hwnd = self._pick_gameplay_window(pid)
@@ -441,6 +490,23 @@ class TrayApp(QtWidgets.QSystemTrayIcon):
         rect = wintypes.RECT()
         if not GetWindowRect(hwnd, ctypes.byref(rect)):
             return None
+        return (rect.left, rect.top, rect.right-rect.left, rect.bottom-rect.top)
+
+    def _get_visible_window_rect(self, hwnd):
+        """Get visible window bounds excluding invisible borders/shadows (DWM extended frame bounds)."""
+        if not hwnd:
+            return None
+        rect = wintypes.RECT()
+        # Try to get DWM extended frame bounds (visible area without invisible borders)
+        result = DwmGetWindowAttribute(
+            hwnd,
+            DWMWA_EXTENDED_FRAME_BOUNDS,
+            ctypes.byref(rect),
+            ctypes.sizeof(rect)
+        )
+        if result != 0:
+            # Fallback to regular GetWindowRect if DwmGetWindowAttribute fails
+            return self._get_window_rect(hwnd)
         return (rect.left, rect.top, rect.right-rect.left, rect.bottom-rect.top)
 
     def _is_tool_or_owned(self, hwnd):
